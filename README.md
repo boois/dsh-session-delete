@@ -133,6 +133,7 @@ npm test
 - session id 先经 `sessionPersistence.stat()` 校验真实存在，才继续删除；`plan` 是只读端点。
 - 删除路径来自 `stat().location.path`，由 DSH 自身的 `encodeSegment` 编码，无路径穿越；请求体只承载一个 `sessionId`（上限 16 KiB）。
 - 无遥测、无外联、无 `eval`、无子进程、不读凭据。
+- **威胁模型说清楚**：挡住的是「浏览器里的跨源页面」与「未认证的本地脚本」（实测：无 `Origin` 的脚本请求被宿主 `admit()` 判 401；带任意 `Origin` 的请求被同源校验判 403）。本机进程如果**伪装出与请求 `Host` 完全一致的 `Origin`**，宿主仍会把它判成 owner peer——这是宿主保护自己破坏性路由的同一条判据，本插件没有额外放宽，也不宣称能防「已能读写回环端口并伪造 Origin 的本机进程」。
 
 ## 局限
 
