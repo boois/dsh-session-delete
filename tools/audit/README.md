@@ -103,7 +103,7 @@ README.md   DIFFER   npm=ffa880982a61 git=feb1a071ee1e
 
 ### 重装后复跑（第 2 节收尾）
 
-按 [README 的安装/更新流程](../README.md) 用同一条 spec 重装（`git+ssh://git@github.com/boois/dsh-session-delete.git#hardened`，pnpm `Done in 3.8s`）后复跑：
+按 [README 的安装/更新流程](../README.md) 用同一条 spec 重装（`git+ssh://git@github.com/boois/dsh-session-delete.git#hardened`，pnpm `Done in 3.5s`）后复跑，并把随包发布的 `docs/` 两份报告一起量：
 
 ```
 package.json             IDENTICAL
@@ -113,14 +113,21 @@ lib/index.js             IDENTICAL
 lib/client.js            IDENTICAL
 LICENSE                  IDENTICAL
 screenshots.json         IDENTICAL
+docs/AUDIT-0.2.2.md      IDENTICAL
+docs/审计报告-dsh-delete-sessions-0.2.2.md IDENTICAL
 --- 负控制（必须判 DIFFER，否则说明哈希函数没在跑）---
 负控制 DIFFER —— 正常
 全部一致，且负控制有效
 ```
 
-即：**已安装的运行副本与仓库 HEAD 逐字节一致（仅行尾归一）**，装到你机器上的东西和这里的源码是同一份。
+即：**已安装的运行副本与仓库 HEAD 逐字节一致（仅行尾归一）**，连随包发布的报告也是同一份 —— 装到你机器上的东西和这里的源码没有黑盒差额。
 
-维护时注意一个插件管理器的记账怪癖：这次重装 pnpm 返回 `exitCode 0` / `Packages: +1`，而管理器的 `application` 报 `failed` + `error.code = "ambiguous-install"`（pnpm 的变更行没点出包名时就会这样，`changed:false`）。实测内容**确实已更新**（已安装 README 里能搜到本次新增的文案，且上表 7/7 一致）。所以别只看那个字段，用这支脚本量一遍更可靠。
+同一轮再用探针复测线上闸门（端口 27116）：无 Origin → `401`，三种跨源 Origin → `403`，`GET delete` → `405`，与第 3 节一致。
+
+维护时注意两个记账/网络怪癖：
+
+- pnpm 返回 `exitCode 0` / `Packages: +1`，插件管理器却报 `application=failed` + `error.code="ambiguous-install"`（pnpm 的变更行没点出包名时就这样，`changed:false`）。实测内容**确实已更新**（上表 9/9 一致）。别只看那个字段，用这支脚本量一遍更可靠。
+- 同一个 spec 偶尔会在 `spec-host` 阶段报 `dsh: connection to github.com timed out after 5000ms`（`exitCode 1`，5 秒超时偏紧）。重试同一条 spec 即可，无需换渠道。
 
 ## 复现顺序
 
