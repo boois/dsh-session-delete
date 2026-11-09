@@ -1,7 +1,11 @@
-# dsh-delete-sessions bundle patch：在 profile 根部插入一行。
-# 安装为 bundle（`dsh plugin --profile desktop add <path>`）会自动应用此补丁；
+# @boois/dsh-delete-sessions bundle patch：在 profile 根部插入一行。
+# 安装为 bundle（`dsh plugin --profile desktop add <spec>`）会自动应用此补丁；
 # 手动安装需在 profile 自己的 cordis.patch.yml 里加同样一行（不要同时加此文件，
 # 否则会重复加载并因插件 id 冲突报错）。
+#
+# 注意：id 与 name 必须等于包名（scoped）。浏览器半区的模块 id 也必须是它，
+# 装载器按 id 认领模块（@deepseek-ai/dsh-client-modules/lib/client.js:877）。
+# 不要与上游 `dsh-delete-sessions` 同时启用：会同时出现两套删除入口。
 - insert:
-    - id: dsh-delete-sessions
-      name: 'dsh-delete-sessions'
+    - id: '@boois/dsh-delete-sessions'
+      name: '@boois/dsh-delete-sessions'

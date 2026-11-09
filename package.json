@@ -1,7 +1,7 @@
 {
-  "name": "dsh-delete-sessions",
-  "version": "0.2.2",
-  "description": "给 DeepSeek Harness 增加真正的「删除会话」：从侧栏会话菜单永久删除一个会话（停活动、清工作区记账/归档/置顶、删除投影缓存与日志文件），而不是只能归档。",
+  "name": "@boois/dsh-delete-sessions",
+  "version": "0.3.0",
+  "description": "给 DeepSeek Harness 增加真正的「删除会话」：从侧栏会话菜单永久删除一个会话（停活动、关唤醒闸门与定时任务、删日志文件/投影缓存/spill 临时文件/工作区记账），而不是只能归档。fork 自 dsh-delete-sessions，按 docs/AUDIT-0.2.2.md 的审计结论加固。",
   "type": "module",
   "main": "lib/index.js",
   "exports": {
@@ -11,6 +11,7 @@
   },
   "files": [
     "lib",
+    "docs",
     "cordis.patch.yml",
     "README.md",
     "LICENSE",
@@ -18,7 +19,7 @@
     "assets"
   ],
   "scripts": {
-    "test": "node --check lib/index.js && node --check lib/client.js"
+    "test": "node --check lib/index.js && node --check lib/client.js && node tests/selfcheck.mjs"
   },
   "keywords": [
     "dsh-plugin",
@@ -29,8 +30,15 @@
   ],
   "license": "MIT",
   "author": "linusteller",
+  "maintainers": [
+    {
+      "name": "boois",
+      "email": "booisming@gmail.com"
+    }
+  ],
   "engines": {
-    "node": ">=18"
+    "node": ">=18",
+    "dsh": ">=0.2.2-rc.1 <0.4.0"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": ">=4"
@@ -50,11 +58,11 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Linusteller/dsh-session-delete.git"
+    "url": "git+https://github.com/boois/dsh-session-delete.git"
   },
-  "homepage": "https://github.com/Linusteller/dsh-session-delete#readme",
+  "homepage": "https://github.com/boois/dsh-session-delete#readme",
   "bugs": {
-    "url": "https://github.com/Linusteller/dsh-session-delete/issues"
+    "url": "https://github.com/boois/dsh-session-delete/issues"
   },
   "publishConfig": {
     "access": "public"
