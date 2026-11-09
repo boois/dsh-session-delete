@@ -5,6 +5,7 @@
 - **证据缩写**：`<core>` 指 DSH 0.2.2-rc.1 运行时 `app.asar` 解包后的 `node_modules\@deepseek-ai` 目录；`P` / `C` 指插件的 `lib/index.js`、`lib/client.js`。
 - **审计方式**：源码逐行读 + 与宿主核心契约逐条比对 + 磁盘实况取证，并包含**非破坏性运行时探测**（只用不存在的 session id 打删除路由，不触碰任何真实会话）；探测之后把插件停用并复测，得到 `405`，确认路由随插件停用而下线。
 - **取证脚本**：上述每一步都可复现，脚本在本仓库 [`tools/audit/`](../tools/audit/README.md)（asar 解包核对、npm 包字节一致比对、tar 内容清单、只读端点探针），含运行方法与当时及今天的实测输出。正文一字未改。
+- **交付原件**：下方正文与 [`docs/审计报告-dsh-delete-sessions-0.2.2.md`](审计报告-dsh-delete-sessions-0.2.2.md) 逐字符一致（`node tools/audit/verify-report-verbatim.mjs` 实测 18465 字符 IDENTICAL），本文件只是在正文前加了 638 字符前言。
 
 ---
 

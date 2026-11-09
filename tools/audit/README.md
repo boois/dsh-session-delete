@@ -103,7 +103,24 @@ README.md   DIFFER   npm=ffa880982a61 git=feb1a071ee1e
 
 ### 重装后复跑（第 2 节收尾）
 
-（见本节下方「重装后」追加记录。）
+按 [README 的安装/更新流程](../README.md) 用同一条 spec 重装（`git+ssh://git@github.com/boois/dsh-session-delete.git#hardened`，pnpm `Done in 3.8s`）后复跑：
+
+```
+package.json             IDENTICAL
+README.md                IDENTICAL
+cordis.patch.yml         IDENTICAL
+lib/index.js             IDENTICAL
+lib/client.js            IDENTICAL
+LICENSE                  IDENTICAL
+screenshots.json         IDENTICAL
+--- 负控制（必须判 DIFFER，否则说明哈希函数没在跑）---
+负控制 DIFFER —— 正常
+全部一致，且负控制有效
+```
+
+即：**已安装的运行副本与仓库 HEAD 逐字节一致（仅行尾归一）**，装到你机器上的东西和这里的源码是同一份。
+
+维护时注意一个插件管理器的记账怪癖：这次重装 pnpm 返回 `exitCode 0` / `Packages: +1`，而管理器的 `application` 报 `failed` + `error.code = "ambiguous-install"`（pnpm 的变更行没点出包名时就会这样，`changed:false`）。实测内容**确实已更新**（已安装 README 里能搜到本次新增的文案，且上表 7/7 一致）。所以别只看那个字段，用这支脚本量一遍更可靠。
 
 ## 复现顺序
 
