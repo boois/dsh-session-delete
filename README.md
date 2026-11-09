@@ -126,6 +126,12 @@ npm test
 = `node --check lib/index.js` + `node --check lib/client.js` + `node tests/selfcheck.mjs`。
 `tests/selfcheck.mjs` 用一个**假 ctx** 跑纯逻辑断言：鉴权门槛（无 `connection` 服务 / 非 owner peer / `admit` 拒绝 / 三种跨源 Origin / 同源放行）、任务扫描的五种命中字段与 `new_once` 保留 id、子会话并集、spill 精确名匹配、`plan` 的 not-found 与路由方法约束。它**只使用不存在的 session id**，不读写 `~/.dsh` 下任何真实数据，因此可以随时跑。
 
+```
+npm run test:audit
+```
+
+语法检查取证脚本。审计结论的**复现方法**与当时及今天的实测输出在 [`tools/audit/README.md`](tools/audit/README.md)：报告原文未被改的校验、npm 发布物 ↔ git 提交的字节比对、只读鉴权探针、tar 内容清单、asar 解包（报告里所有宿主行号的出处）。报告见 [`docs/AUDIT-0.2.2.md`](docs/AUDIT-0.2.2.md)，交付原件在 [`docs/审计报告-dsh-delete-sessions-0.2.2.md`](<docs/审计报告-dsh-delete-sessions-0.2.2.md>)。
+
 ## 安全
 
 - 删除端点走宿主 `connection` 服务的 `admit()`，且要求 `peer.principal.kind === 'owner'`（宿主保护自己破坏性路由的同一条判据）；`GET` 与跨源请求一律拒绝。

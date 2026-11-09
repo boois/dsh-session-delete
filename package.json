@@ -19,7 +19,8 @@
     "assets"
   ],
   "scripts": {
-    "test": "node --check lib/index.js && node --check lib/client.js && node tests/selfcheck.mjs"
+    "test": "node --check lib/index.js && node --check lib/client.js && node tests/selfcheck.mjs",
+    "test:audit": "node --check tools/audit/probe-endpoints.mjs && node --check tools/audit/tar-inspect.mjs && node --check tools/audit/asar-list.mjs"
   },
   "keywords": [
     "dsh-plugin",
