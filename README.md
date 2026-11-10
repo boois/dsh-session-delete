@@ -53,6 +53,21 @@ DSH 内建的「归档」（archive）只做一件事：把会话 id 加进 `arc
 12. **发布护栏。** 加上 `engines.dsh` 版本护栏；`files` 纳入 `docs/`；市场截图 `assets/` 已存在于仓库（0.2.2 发版时尚未提交，所以 tarball 缺图、市场页图裂）。
     → 你能看到的效果：宿主版本不匹配时在安装期就被拦住，而不是运行时静默降级；市场页截图正常显示。
 
+## 0.3.1 修了什么
+
+**现象**（0.3.0 实测）：点「删除会话」后确认框停在「正在读取影响面…」，下面一行红字
+`未完成：cannot get required service "sessions" in inactive context`，删除无法继续。
+
+**根因**：插件把两条 exact 路由注册进宿主 `webServer`，却**没把 `register()` 返回的 disposer 交回 `ctx.effect`**（宿主 `dsh-host-webserver/lib/index.js:375-382` 明确：返回 disposer，重复注册直接抛）。于是插件在进程内被重载（重装、升级都算）之后：旧 fiber 已 disposed，旧路由却还留在宿主路由表里继续派发；请求打进去时闭包里的 `ctx` 已失活，Cordis 的属性代理抛 `cannot get required service "<service>" in inactive context`（`@deepseek-ai/cordis/lib/index.js:1271`）。与此同时新一代 `apply` 撞上 `webserver: duplicate exact route` 直接抛 —— **旧路由占位、新路由注册不上**，界面就永远读不到影响面。
+
+**改了三处**：
+
+1. **交回 disposer**：插件卸载/重载时两条路由随之注销（自检断言「注销后路由数为 0」）。
+2. **调用时取 ctx**：路由处理器改为读「最近一次 `apply` 收到的 ctx」；就算派发到上一代遗留路由，也会换用新 ctx 继续服务，不再抛 inactive。
+3. **降级与话术**：注册撞车只 `warn` 不抛；`inactive context` 一类错误一律回 `503` + 「请刷新页面后重试；若仍失败，重启一次应用即可」，不再把内核报错直接摆到用户面前。
+
+**已经在 0.3.0 上踩到这个错误怎么办**：装 0.3.1 后**刷新页面**（客户端 bundle 的 `rev` 变了，要重新加载）。遗留旧路由会被第 2 条自愈；想彻底清除，重启一次应用即可。
+
 ## 明确不覆盖的残留（隐私边界）
 
 「删除会话」删的是会话日志与投影缓存这一条链，**下面这些它删不掉**，请自行处理，也别把插件文案理解成覆盖它们：

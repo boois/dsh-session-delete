@@ -1,6 +1,7 @@
 /**
- * 非破坏性自检：用假 ctx 验证 0.3.0 的鉴权门槛、任务扫描、spill 命名与
- * 「不存在会话」路径。只用不存在的 id，绝不触碰真实数据。
+ * 非破坏性自检：用假 ctx 验证 0.3.1 的鉴权门槛、任务扫描、spill 命名、
+ * 「不存在会话」路径，以及路由生命周期（插件重载后旧 ctx 失活）。
+ * 只用不存在的 id，绝不触碰真实数据。
  */
 import { createHash } from 'node:crypto';
 import {
@@ -10,6 +11,7 @@ import {
   planDelete,
   handleDeleteRequest,
   handlePlanRequest,
+  apply,
   DELETE_PATH,
   PLAN_PATH,
 } from '../lib/index.js';
@@ -120,6 +122,71 @@ check('plan 缺 origin 的同源 GET → 200/404 业务码', res.status, 404);
 res = makeRes();
 await handleDeleteRequest(passCtx, req('GET', DELETE_PATH, { host: '127.0.0.1:7087' }), res);
 check('删除路由只接受 POST → 405', res.status, 405);
+
+// —— 0.3.1：路由生命周期 + 插件重载后旧 ctx 失活 ——
+// 现场故障：重装插件后旧 fiber 已 disposed、旧路由仍占位，请求打进去抛
+// `cannot get required service "sessions" in inactive context`（cordis:1271）。
+const makeServer = () => {
+  const routes = new Map();
+  return {
+    routes,
+    register(route) {
+      if (routes.has(route.path)) throw new Error(`webserver: duplicate ${route.kind} route "${route.path}"`);
+      routes.set(route.path, route);
+      return () => { routes.delete(route.path); };
+    },
+  };
+};
+const makeApplyCtx = (server, log) => {
+  const cleanups = [];
+  const ctx = { fiber: { runtime: {} }, logger: { warn: (m) => log.push(m), debug: () => {} }, get: () => undefined };
+  const web = { webServer: server, logger: ctx.logger, effect: (fn) => { cleanups.push(fn()); } };
+  ctx.inject = (_deps, callback) => callback(web);
+  return { ctx, cleanups };
+};
+
+let log = [];
+let server = makeServer();
+let applied = makeApplyCtx(server, log);
+apply(applied.ctx);
+check('apply 注册 plan + delete 两条 exact 路由', [...server.routes.keys()].sort(), [DELETE_PATH, PLAN_PATH].sort());
+check('apply 把 disposer 交回 effect（0.3.0 漏了这一步）', typeof applied.cleanups[0], 'function');
+applied.cleanups[0]();
+check('插件卸载后两条路由随 fiber 下线', server.routes.size, 0);
+
+// 上一代遗留路由占位：apply 不许抛，只 warn（否则重载后整个插件再也注册不上）
+log = [];
+server = makeServer();
+server.register({ kind: 'exact', path: PLAN_PATH, handler: () => {} });
+applied = makeApplyCtx(server, log);
+apply(applied.ctx);
+check('遗留旧路由占位时 apply 不抛，且只注册剩下那条', {
+  registered: server.routes.has(DELETE_PATH),
+  warned: log.length === 1 && log[0].includes('注册失败'),
+}, { registered: true, warned: true });
+
+// 旧一代 ctx（fiber.runtime 已不存在）→ 换用最近一次 apply 的 ctx，而不是抛 inactive
+server = makeServer();
+applied = makeApplyCtx(server, []);
+apply(applied.ctx);
+const staleCtx = { fiber: { runtime: undefined }, get() { throw new Error('cannot get required service "sessions" in inactive context'); } };
+res = makeRes();
+await handlePlanRequest(staleCtx, req('GET', `${PLAN_PATH}?sessionId=${BOGUS}`, { host: '127.0.0.1:7087' }), res);
+check('失活 ctx 自动换用最新 ctx（不再抛 inactive context）', res.status, 503);
+
+// inactive 错误如果仍漏到 catch，必须翻成 503 + 可操作话术
+const explodeCtx = { fiber: { runtime: {} }, get() { throw new Error('cannot get required service "sessions" in inactive context'); } };
+res = makeRes();
+await handlePlanRequest(explodeCtx, req('GET', `${PLAN_PATH}?sessionId=${BOGUS}`, { host: '127.0.0.1:7087' }), res);
+check('inactive context 漏到 catch → 503 + 提示刷新/重启', {
+  status: res.status,
+  actionable: JSON.parse(res.body).error.includes('刷新页面'),
+}, { status: 503, actionable: true });
+
+// 连 currentCtx 都没有（重载时序极端）：仍是 503，不是 500
+res = makeRes();
+await handlePlanRequest(undefined, req('GET', `${PLAN_PATH}?sessionId=${BOGUS}`, { host: '127.0.0.1:7087' }), res);
+check('ctx 完全缺失 → 503（不是 500 或抛异常）', res.status, 503);
 
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILED`);
 process.exitCode = failures === 0 ? 0 : 1;
