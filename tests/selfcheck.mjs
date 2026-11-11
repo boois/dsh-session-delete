@@ -1,14 +1,18 @@
 /**
- * 非破坏性自检：用假 ctx 验证 0.3.1 的鉴权门槛、任务扫描、spill 命名、
- * 「不存在会话」路径，以及路由生命周期（插件重载后旧 ctx 失活）。
- * 只用不存在的 id，绝不触碰真实数据。
+ * 非破坏性自检：用假 ctx 验证 0.3.2 的鉴权门槛、任务扫描、spill 命名、
+ * 「不存在会话」路径、路由生命周期、以及删除中止时必须回滚归档。
+ * 只用不存在的 id 与 `%TEMP%` 下自建的临时目录，绝不触碰真实数据。
  */
 import { createHash } from 'node:crypto';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   tasksReferencing,
   childrenOf,
   cleanSpill,
   planDelete,
+  deleteSession,
   handleDeleteRequest,
   handlePlanRequest,
   apply,
@@ -187,6 +191,96 @@ check('inactive context 漏到 catch → 503 + 提示刷新/重启', {
 res = makeRes();
 await handlePlanRequest(undefined, req('GET', `${PLAN_PATH}?sessionId=${BOGUS}`, { host: '127.0.0.1:7087' }), res);
 check('ctx 完全缺失 → 503（不是 500 或抛异常）', res.status, 503);
+
+// —— 0.3.2：删除中止必须回滚归档；判据是「没有在跑的工作」而不是「实例已退出」 ——
+// 现场故障：0.3.x 先归档（列表里隐藏）再判断实例是否退出，宿主只取消 turn、不踢
+// store，于是「会话刚用完就删」被判成 still-active 中止 —— 会话已消失但文件都在。
+const TID = 'session-test-temp-0001';
+const tempRoot = mkdtempSync(join(tmpdir(), 'dsh-selfcheck-'));
+const tempDir = join(tempRoot, TID);
+const tempFile = join(tempDir, 'session.v4.jsonl.zstd');
+mkdirSync(tempDir, { recursive: true });
+writeFileSync(tempFile, 'x'.repeat(64));
+
+function makeDeleteCtx({ archived = [], loaded = true, activity = () => [], registry = {} } = {}) {
+  const state = { archived: [...archived], unarchived: [] };
+  const workspaceRegistry = {
+    list: () => [],
+    get archivedSessionIds() { return state.archived; },
+    async archiveSession(id, options = {}) {
+      if (options.stopActivity !== true) throw new Error('自检：应当带 stopActivity');
+      if (!state.archived.includes(id)) state.archived.push(id);
+    },
+    async unarchiveSession(id) {
+      state.unarchived.push(id);
+      state.archived = state.archived.filter((x) => x !== id);
+    },
+    unpinSession: async () => {},
+    ...registry,
+  };
+  const domain = {
+    get: () => ({
+      table: () => ({
+        entries: () => [],
+        get: async () => undefined,
+        put: async () => {},
+        delete: async () => {},
+      }),
+    }),
+  };
+  return {
+    state,
+    ctx: {
+      sessions: { get: () => (loaded ? { header: { id: TID } } : undefined), flush: async () => {} },
+      sessionPersistence: {
+        stat: async (id) => (id === TID && existsSync(tempFile) ? { header: { id }, location: { path: tempFile } } : undefined),
+        // live 实例的 readMeta 只拿 header、不带 location，路径要靠 locate 解析
+        locate: (meta) => ({ path: tempFile, header: meta }),
+      },
+      workspaceRegistry,
+      storageDomain: domain,
+      get(name) { return name === 'storageDomain' ? this.storageDomain : undefined; },
+      emit: () => {},
+      parallel: async () => {},
+      waterfall: async () => activity(),
+      logger: { warn: () => {}, debug: () => {} },
+    },
+  };
+}
+
+// 关键回归：实例仍驻留内存（标签页开着）但**没有在跑的工作** → 必须删成功
+const live = makeDeleteCtx({ loaded: true, activity: () => [] });
+const r1 = await deleteSession(live.ctx, TID);
+check('实例驻留内存但无活动 → 删除成功（旧判据会说 session-active）', {
+  ok: r1.ok,
+  fileGone: !existsSync(tempFile),
+  warned: Array.isArray(r1.warnings) && r1.warnings.some((w) => w.includes('驻留宿主内存')),
+}, { ok: true, fileGone: true, warned: true });
+
+// 真的有工作没停 → 中止，且归档桥接被回滚（会话不能就这么消失）
+mkdirSync(tempDir, { recursive: true });
+writeFileSync(tempFile, 'y'.repeat(64));
+const busy = makeDeleteCtx({ loaded: true, activity: () => [{ kind: 'turn' }] });
+const r2 = await deleteSession(busy.ctx, TID);
+check('仍有未结束的 turn → 中止且不删文件', { ok: r2.ok, code: r2.code, fileGone: !existsSync(tempFile) }, { ok: false, code: 'session-active', fileGone: false });
+check('中止时回滚本次归档（会话重新可见）', { archived: busy.state.archived, unarchived: busy.state.unarchived }, { archived: [], unarchived: [TID] });
+
+// 用户自己归档过的会话：中止时不许替用户取消归档
+const preArchived = makeDeleteCtx({ archived: [TID], loaded: true, activity: () => [{ kind: 'turn' }] });
+const r3 = await deleteSession(preArchived.ctx, TID);
+check('本来已归档 → 中止时不擅自取消归档', { archived: preArchived.state.archived, unarchived: preArchived.state.unarchived }, { archived: [TID], unarchived: [] });
+
+// 定时任务未确认 → 一步都没删，同样要回滚归档
+const withTask = makeDeleteCtx({ loaded: true, activity: () => [] });
+withTask.ctx.storageDomain = {
+  get: () => ({ table: () => ({ entries: () => [[ 'task-x', { record: { id: 'task-x' }, target: { kind: 'session', sessionId: TID }, status: 'active' } ]], get: async () => undefined, put: async () => {}, delete: async () => {} }) }),
+};
+const r4 = await deleteSession(withTask.ctx, TID);
+check('有活动定时任务且未确认 → 中止、回滚归档、文件保留', {
+  ok: r4.ok, code: r4.code, fileGone: !existsSync(tempFile), archived: withTask.state.archived, unarchived: withTask.state.unarchived,
+}, { ok: false, code: 'tasks-reference', fileGone: false, archived: [], unarchived: [TID] });
+
+rmSync(tempRoot, { recursive: true, force: true });
 
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILED`);
 process.exitCode = failures === 0 ? 0 : 1;
