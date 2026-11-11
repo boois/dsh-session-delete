@@ -93,6 +93,13 @@ check('spill 清理只按精确名匹配，不存在的 id 不删任何东西', 
 
 check('plan 对不存在的会话返回 not-found', await planDelete(ctx, BOGUS), { ok: false, code: 'not-found', exists: false });
 
+// 0.3.3：plan 要分开报「实例驻留」(live) 与「有工作在跑」(active) —— 前者不该被
+// 渲染成「正在运行」。
+const planIdleLoaded = await planDelete({ ...ctx, waterfall: async () => [], sessions: { get: () => ({ header: { id: BOGUS } }), flush: async () => {} } }, BOGUS);
+check('实例驻留但无活动 → live=true 且 active=false', { ok: planIdleLoaded.ok, live: planIdleLoaded.live, active: planIdleLoaded.active }, { ok: true, live: true, active: false });
+const planBusy = await planDelete({ ...ctx, waterfall: async () => [{ kind: 'turn' }], sessions: { get: () => ({ header: { id: BOGUS } }), flush: async () => {} } }, BOGUS);
+check('有 turn 在跑 → active=true 且带 activity 种类', { active: planBusy.active, activity: planBusy.activity }, { active: true, activity: ['turn'] });
+
 // 鉴权门槛：connection 服务缺失 → 503（上游是放行）
 let res = makeRes();
 await handleDeleteRequest(ctx, req('POST', DELETE_PATH, { host: '127.0.0.1:7087' }), res);
