@@ -1,6 +1,6 @@
 {
   "name": "@boois/dsh-delete-sessions",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "description": "给 DeepSeek Harness 增加真正的「删除会话」：从侧栏会话菜单永久删除一个会话（停活动、关唤醒闸门与定时任务、删日志文件/投影缓存/spill 临时文件/工作区记账），而不是只能归档。fork 自 dsh-delete-sessions，按 docs/AUDIT-0.2.2.md 的审计结论加固。",
   "type": "module",
   "main": "lib/index.js",

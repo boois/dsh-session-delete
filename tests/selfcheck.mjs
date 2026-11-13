@@ -10,6 +10,8 @@ import { join } from 'node:path';
 import {
   tasksReferencing,
   childrenOf,
+  childrenOfDetailed,
+  leftoverChildren,
   cleanSpill,
   planDelete,
   deleteSession,
@@ -288,6 +290,52 @@ check('有活动定时任务且未确认 → 中止、回滚归档、文件保�
 }, { ok: false, code: 'tasks-reference', fileGone: false, archived: [], unarchived: [TID] });
 
 rmSync(tempRoot, { recursive: true, force: true });
+
+// —— 0.3.4：子会话枚举的兜底 ——
+// 现场：子会话的投影缓存行里**没有** parentSession，而父会话日志一旦先被删，
+// subagentCatalog 就再也读不到 —— 两条路同时失灵，子会话静默变孤儿。
+const PARENT = 'session-test-parent-0001';
+const CHILD_A = 'bb88afd7-8b12-48bc-8568-4f4d11d5fdd0';
+const CHILD_B = 'c611096b-b757-467f-a88f-f8e870a9ae6c';
+const headers = [
+  { id: PARENT },
+  { id: CHILD_A, parentSession: PARENT, origin: 'subagent', delegationDepth: 1 },
+  { id: CHILD_B, parentSession: PARENT, origin: 'subagent', delegationDepth: 1 },
+  { id: 'session-unrelated-0002' },
+];
+const brokenCatalogCtx = {
+  get(name) {
+    if (name === 'subagent') {
+      return { listChildren: async () => { throw new Error('SUBAGENT_CONTROL_QUERY_UNAVAILABLE'); } };
+    }
+    if (name === 'storageDomain') return { get: () => ({ table: () => ({ entries: () => [] }) }) };
+    return undefined;
+  },
+  sessionPersistence: { list: async () => headers.map((header) => ({ header })) },
+  logger: { warn: () => {}, debug: () => {} },
+};
+const scan = await childrenOfDetailed(brokenCatalogCtx, PARENT);
+check('目录投影失效时，按会话头部 parentSession 兜底找出全部子会话',
+  scan.children.sort(), [CHILD_A, CHILD_B].sort());
+check('兜底生效时明确告知「目录投影不可用」而不是静默', {
+  noted: scan.notes.some((n) => n.includes('目录投影不可用') && n.includes('兜底')),
+}, { noted: true });
+
+// 两条路都废：必须警告「可能残留」，不能装作扫全了
+const blindCtx = {
+  get: () => undefined,
+  sessionPersistence: { list: async () => { throw new Error('list failed'); } },
+  logger: { warn: () => {}, debug: () => {} },
+};
+const blind = await childrenOfDetailed(blindCtx, PARENT);
+check('枚举完全失效时警告可能有子会话残留', {
+  children: blind.children.length,
+  warned: blind.notes.some((n) => n.includes('可能有子会话残留')),
+}, { children: 0, warned: true });
+
+// 删后复核：还能按 header 找到残留
+check('删后复核能列出仍指向该父会话的子会话', await leftoverChildren(brokenCatalogCtx, PARENT), [CHILD_A, CHILD_B]);
+check('删后复核：父会话已无子会话时返回空', await leftoverChildren(brokenCatalogCtx, 'session-unrelated-0002'), []);
 
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILED`);
 process.exitCode = failures === 0 ? 0 : 1;

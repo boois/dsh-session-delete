@@ -103,6 +103,26 @@ DSH 内建的「归档」（archive）只做一件事：把会话 id 加进 `arc
 
 **结论**：看到「仍驻留但可以直接删除」时，**照按「永久删除」就行，不需要重启**。只有出现「有未结束的工作」时才需要等它结束（或者切走/关掉那个标签页）。
 
+## 0.3.4 修了什么
+
+**问题**：子代理子会话的枚举不够可靠，最坏情况会把子会话变成**静默孤儿**。
+
+插件原先只走两条路：`subagent.listChildren`（读父会话日志里的 `subagentCatalog` 投影）+ 扫投影缓存行的 `header.parentSession`。但实测（2026-11-13，`session-b0daef3d…`，2 个子会话）：
+
+- 子会话的投影缓存行**只有 projections 行**（turnBoundary / title / subagent / …），**根本没有 `parentSession` 字段** → 第二条路径对这批子会话完全无效；
+- 第一条路径读的是父会话日志的投影，**父日志一删就永久失效**（比如上一次删除只删了一半，或你手动清了日志）；
+- 两条同时失灵时，原来的代码只在 debug 日志里记一句，删除照样报成功 —— 子会话就这么留在了磁盘上。
+
+**真正的父子关系是 durable 的**：写在子会话日志第一行的 header 里（`parentSession` + `origin:"subagent"` + `delegationDepth`）。宿主自己列子会话用的就是这个判据（`dsh-session-persistence-jsonl/lib/index.js:2736` 的 `listArtifacts().filter(h => h.header.origin === 'subagent' && h.header.parentSession === id)`）。
+
+**改了三处**：
+
+1. **加第三道路径**：用 `sessionPersistence.list()` 的每个快照 header 按 `parentSession` 过滤。它对裸 UUID 子会话目录同样有效（`listSessionDirs` 列的是项目下所有子目录，不按 `session-` 前缀过滤）。
+2. **不再静默**：目录投影失败时会区分「已用头部兜底枚举」与「两条路都废、可能有残留」，前者进 `warnings`、后者也进 `warnings` 并在确认框里显示「子会话清单可能不完整」。
+3. **删后复核**：删完再用同一条 durable 判据扫一遍，仍指向该会话的子会话若没被删掉，直接进 `failures`（结果是 `partial`，不是成功）。
+
+**对你的场景**：`session-b0daef3d…` 的 2 个子会话（`bb88afd7…`、`c611096b…`，各约 100 KB）在确认框里会显示「将连带删除 2 个子代理子会话」。兜底判据已对真实磁盘预演验证：可枚举 53 个会话、准确命中这 2 个。
+
 ## 明确不覆盖的残留（隐私边界）
 
 「删除会话」删的是会话日志与投影缓存这一条链，**下面这些它删不掉**，请自行处理，也别把插件文案理解成覆盖它们：
